@@ -50,6 +50,7 @@ def clusterStatus(clusterDictionary):
         ipAddress = v.ssh_config(hostName).splitlines()[1].split()[1]
         print status
         clusterNode = {}
+        clusterNode["nodeName"] = hostName
         clusterNode["ipAddress"] = ipAddress
         clusterNode["status"] = status
         nodeInfo.append(clusterNode)
@@ -61,7 +62,19 @@ def clusterStatus(clusterDictionary):
 
 def etcHosts(clusterDictionary):
     print "Build ETC HOSTS and UPLOAD"
+    lines=[]
+    lines.append("####  GPDB-GCE BUILT /ETC/HOSTS\n")
+    for node in clusterDictionary["nodeInfo"]:
+        lines.append(node["internalIPAddress"]+"  "+node["nodeName"])
+    clusterPath = "./" + clusterDictionary["clustername"]
+    with open ("hosts","w") as hostsFile:
+        for line in lines:
+            hostsFile.write(line+"\n")
 
+
+
+    for node in clusterDictionary["nodeInfo"]:
+        ssh.putFile(node["ipAddress"],"hosts","gpadmin","gpadmin")
 
 def createCluster(clusterDictionary):
     if not os.path.exists(clusterDictionary["clustername"]):
@@ -81,6 +94,7 @@ def createCluster(clusterDictionary):
     v = vagrant.Vagrant(quiet_stdout=True)
     v.up(provider="google")
     clusterStatus(clusterDictionary)
+    etcHosts(clusterDictionary)
 
 
 
