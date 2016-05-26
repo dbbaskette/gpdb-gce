@@ -26,8 +26,7 @@ securityChanges(){
 }
 
 installGPDBbins(){
-    wget https://storage.googleapis.com/pivedu-bins/greenplum-db-4.3.8.2-build-1-RHEL5-x86_64.zip
-    #cd /vagrant
+    wget https://storage.googleapis.com/pivedu-bins/$GPZIP
     unzip $GPZIP
     GPBIN="${GPZIP%.*}.bin"
     sed -i 's/more <</cat <</g' ./$GPBIN
@@ -37,17 +36,13 @@ installGPDBbins(){
     sudo ./$GPBIN
 }
 
-buildGPHosts(){
 
-    echo "TEST"
-
-
-}
 
 _main() {
     gpadminUser
     securityChanges
-    #installGPDBbins
+    installGPDBbins
+
 
 
 }

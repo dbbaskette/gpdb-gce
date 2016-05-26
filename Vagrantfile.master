@@ -25,10 +25,6 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     config.vm.box = "gce"
     config.ssh.pty = true
     config.ssh.forward_agent = false
-    config.hostmanager.enabled = false
-    config.hostmanager.ip_resolver = $ip_resolver
-
-
 
 # Build  Nodes
 
@@ -36,7 +32,10 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
         node_name = "#{BASENAME}-#{node_num}-#{CLUSTER_ID}"
         config.vm.define node_name do |node|
             node.vm.provision "shell",inline: "sed -i 's|[#]*PasswordAuthentication no|PasswordAuthentication yes|g' /etc/ssh/sshd_config"
+
             node.vm.provision "shell",inline: "sed -i 's|UsePAM no|UsePAM yes|g' /etc/ssh/sshd_config"
+            node.vm.provision "shell",inline: "echo 'Defaults !requiretty\n' > /etc/sudoers.d/888-dont-requiretty"
+
             node.vm.provision "shell", path: "../scripts/prepareHost.sh"
             node.vm.provision "shell",inline: "/etc/init.d/sshd reload"
 
