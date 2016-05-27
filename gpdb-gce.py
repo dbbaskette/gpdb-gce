@@ -9,6 +9,11 @@ import shutil
 from libcloud.compute.types import Provider
 from libcloud.compute.providers import get_driver
 from libcloud.compute.ssh import ParamikoSSHClient
+
+import paramiko
+from paramiko.client import WarningPolicy
+
+
 import time
 def cliParse():
     VALID_ACTION = ["create","destroy","query"]
@@ -230,30 +235,37 @@ def createCluster(clusterDictionary,verbose):
         print nodeName+": Internal IP: "+clusterNode["internalIP"]
         clusterNodes.append(clusterNode)
         print nodeName+": Prepping Host"
-        sshClient=ParamikoSSHClient(clusterNode["externalIP"],22,SSH_USERNAME,None,key=None,key_files=SSH_KEY_PATH,timeout=120)
+
+
+        #sshClient=ParamikoSSHClient(clusterNode["externalIP"],22,SSH_USERNAME,None,key=None,key_files=SSH_KEY_PATH,timeout=120)
 
        # Do something more elaborate here.  Perhaps Build all server then do the SSH stuff
 
         time.sleep(60)
-
-        sshClient.connect()
-
-
-        print sshClient.run("sudo sed -i 's|[#]*PasswordAuthentication no|PasswordAuthentication yes|g' /etc/ssh/sshd_config")
-        print sshClient.run("sudo sed -i 's|UsePAM no|UsePAM yes|g' /etc/ssh/sshd_config")
-        print sshClient.run("sudo sh -c 'echo Defaults !requiretty\n > /etc/sudoers.d/888-dont-requiretty'")
-
-        path, filename = os.path.split("../configs/sysctl.conf.gpdb")
-        print os.getcwd()
-
-        #FIX THESE PUTS!!   THEY ARE PUTTING THIS STRING IN instead of the file
-
-        print sshClient.put("/tmp/sysctl.conf.gpdb","../configs/sysctl.conf.gpdb")
-        print sshClient.put("/tmp/limits.conf.gpdb","../configs/limits.conf.gpdb")
-        print sshClient.run("sudo sh -c 'cat /tmp/sysctl.conf.gpdb >> /etc/sysctl.conf'")
-        print sshClient.run("sudo sh -c 'cat /tmp/limits.conf.gpdb >> /etc/security/limits.conf'")
+        #sshClient.connect()
 
 
+
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(WarningPolicy())
+        client.connect(clusterNode["externalIP"], 22, SSH_USERNAME, None, pkey=None, key_filename=SSH_KEY_PATH,timeout=120)
+        sftp = client.open_sftp()
+        sftp.put("../configs/sysctl.conf.gpdb", "/tmp/sysctl.conf.gpdb")
+        sftp.put("../configs/limits.conf.gpdb", "/tmp/limits.conf.gpdb")
+        client.close()
+
+
+        #  MOVE THIS TO NEW METHOD   def preInstallPrep
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(WarningPolicy())
+        client.connect(clusterNode["externalIP"],22,SSH_USERNAME,None,pkey=None,key_filename=SSH_KEY_PATH,timeout=120)
+
+        print client.exec_command("sudo sed -i 's|[#]*PasswordAuthentication no|PasswordAuthentication yes|g' /etc/ssh/sshd_config")
+        print client.exec_command("sudo sed -i 's|UsePAM no|UsePAM yes|g' /etc/ssh/sshd_config")
+        print client.exec_command("sudo sh -c 'echo Defaults !requiretty\n > /etc/sudoers.d/888-dont-requiretty'")
+        print client.exec_command("sudo sh -c 'cat /tmp/sysctl.conf.gpdb >> /etc/sysctl.conf'")
+        print client.exec_command("sudo sh -c 'cat /tmp/limits.conf.gpdb >> /etc/security/limits.conf'")
+        client.close()
 
     pprint.pprint(clusterNodes)
 
