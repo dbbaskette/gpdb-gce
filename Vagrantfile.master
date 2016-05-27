@@ -13,14 +13,6 @@ SSH_USERNAME = "dbaskette"
 SSH_KEY_PATH = "~/.ssh/google_compute_engine"
 
 
-if Gem::Version.new(::Vagrant::VERSION) < Gem::Version.new('1.5')
-  Vagrant.require_plugin('vagrant-hostmanager')
-end
-
-
-
-
-
 Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     config.vm.box = "gce"
     config.ssh.pty = true
@@ -31,14 +23,17 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     (1..NODES).each do |node_num|
         node_name = "#{BASENAME}-#{node_num}-#{CLUSTER_ID}"
         config.vm.define node_name do |node|
+            config.vm.synced_folder "../configs", "/vagrant/configs"
+
             node.vm.provision "shell",inline: "sed -i 's|[#]*PasswordAuthentication no|PasswordAuthentication yes|g' /etc/ssh/sshd_config"
 
             node.vm.provision "shell",inline: "sed -i 's|UsePAM no|UsePAM yes|g' /etc/ssh/sshd_config"
             node.vm.provision "shell",inline: "echo 'Defaults !requiretty\n' > /etc/sudoers.d/888-dont-requiretty"
+            node.vm.provision "shell",inline: "cat '/vagrant/configs/sysctl.conf.gpdb' >> /etc/sysctl.conf"
+            node.vm.provision "shell",inline: "cat '/vagrant/configs/limits.conf.gpdb' >> /etc/security/limits.conf"
 
             node.vm.provision "shell", path: "../scripts/prepareHost.sh"
-            node.vm.provision "shell",inline: "/etc/init.d/sshd reload"
-
+            node.vm.provision :reload
 
             node.vm.provider :google do |google, override|
                 google.google_project_id = PROJECT_ID
@@ -46,13 +41,16 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
                 google.google_json_key_location = KEY
                 google.zone = ZONE
                 google.image = IMAGE
-                google.instance_ready_timeout = 600
+                google.instance_ready_timeout = 800
+                google.disk_type = "pd-standard"
+                google.disk_size = 500
+                google.instance_group = CLUSTER_ID
                 override.ssh.username = SSH_USERNAME
                 override.ssh.private_key_path = SSH_KEY_PATH
                 google.name = node_name
-                google.machine_type = "n1-standard-1"
-                google.metadata = {'type' => 'master'}
-                google.tags = ['pivotal', 'edu','master']
+                google.machine_type = "n1-standard-4"
+                google.metadata = {'type' => 'gpdb'}
+                google.tags = ['pivotal', 'edu','gpdb']
             end
 
   
