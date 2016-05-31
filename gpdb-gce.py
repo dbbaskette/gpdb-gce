@@ -9,7 +9,7 @@ from libcloud.compute.types import Provider
 from libcloud.compute.providers import get_driver
 
 import paramiko
-from paramiko.client import WarningPolicy
+from paramiko.client import WarningPolicy,SSHException
 
 
 import time
@@ -74,7 +74,6 @@ def hostPrep(clusterDictionary):
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(WarningPolicy())
     #client.connect(clusterNode["externalIP"], 22, SSH_USERNAME, None, pkey=None, key_filename=SSH_KEY_PATH, timeout=120)
-    print clusterDictionary
     for node in clusterDictionary["clusterNodes"]:
         client.connect(node["externalIP"], 22, SSH_USERNAME, password="gpadmin",timeout=120)
         client.exec_command("echo 'source /usr/local/greenplum-db/greenplum_path.sh\n' >> ~/.bashrc")
@@ -205,9 +204,11 @@ def createCluster(clusterDictionary,verbose):
         volume = driver.create_volume(500,nodeName+"-data-disk",None,None,None,False,"pd-standard")
         print nodeName+": Creating Compute Instance"
         node = driver.create_node(nodeName,size=serverType,image=None,location=zone,ex_disks_gce_struct=gce_disk_struct)
+        #clusterNode["uuid"] = str(node).split(",")[0].split("=")[1]
         clusterNode["externalIP"] = str(node).split(",")[3].split("'")[1]
         clusterNode["internalIP"] = str(node).split(",")[4].split("'")[1]
         clusterNode["nodeName"] = nodeName
+        #print nodeName+": UUID       : "+clusterNode["uuid"]
         print nodeName+": External IP: "+clusterNode["externalIP"]
         print nodeName+": Internal IP: "+clusterNode["internalIP"]
         # Set Server Role
@@ -224,24 +225,37 @@ def createCluster(clusterDictionary,verbose):
 
         # This Sleep should be turned into a try catch on the SSH connection with a while loop so that it cuts the time to provision
 
-        time.sleep(40)
-        #driver.wait_until_running(nodeName,wait_period=3, timeout=600, ssh_interface='public_ips')
-
 
 
         client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(WarningPolicy())
-        client.connect(clusterNode["externalIP"], 22, SSH_USERNAME, None, pkey=None, key_filename=SSH_KEY_PATH,timeout=120)
+        keyOutput = client.set_missing_host_key_policy(WarningPolicy())
+
+        #time.sleep(40)
+        # Block until Host comes up and then block until SSH is ready.
+        driver.wait_until_running([node],wait_period=3, timeout=600, ssh_interface='public_ips')
+
+        connected = False
+        while not connected:
+            try:
+                client.connect(clusterNode["externalIP"], 22, SSH_USERNAME, None, pkey=None, key_filename=SSH_KEY_PATH,timeout=120)
+                connected=True
+            except Exception as e:
+                print nodeName+": --- Trying to get SSH Connection"
+                time.sleep(3)
+                sshException = e;
+
+
+
         sftp = client.open_sftp()
         sftp.put("../configs/sysctl.conf.gpdb", "/tmp/sysctl.conf.gpdb")
         sftp.put("../configs/limits.conf.gpdb", "/tmp/limits.conf.gpdb")
         sftp.put("../scripts/prepareHost.sh","/tmp/prepareHost.sh")
-        client.close()
-
-        #  MOVE THIS TO NEW METHOD   def preInstallPrep
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(WarningPolicy())
-        client.connect(clusterNode["externalIP"],22,SSH_USERNAME,None,pkey=None,key_filename=SSH_KEY_PATH,timeout=120)
+        # client.close()
+        #
+        # #  MOVE THIS TO NEW METHOD   def preInstallPrep
+        # client = paramiko.SSHClient()
+        # client.set_missing_host_key_policy(WarningPolicy())
+        # client.connect(clusterNode["externalIP"],22,SSH_USERNAME,None,pkey=None,key_filename=SSH_KEY_PATH,timeout=120)
 
         client.exec_command("sudo sed -i 's|[#]*PasswordAuthentication no|PasswordAuthentication yes|g' /etc/ssh/sshd_config")
         client.exec_command("sudo sed -i 's|UsePAM no|UsePAM yes|g' /etc/ssh/sshd_config")
@@ -249,16 +263,14 @@ def createCluster(clusterDictionary,verbose):
         client.exec_command("sudo sh -c 'cat /tmp/sysctl.conf.gpdb >> /etc/sysctl.conf'")
         client.exec_command("sudo sh -c 'cat /tmp/limits.conf.gpdb >> /etc/security/limits.conf'")
         client.exec_command("sudo chmod +x /tmp/prepareHost.sh")
-        print "Rebooting Hosts to change System Settings"
 
-        #node = driver.reboot_node(nodeName)
-        print driver.list_nodes()
 
-        
-        #driver.wait_until_running([nodeName],wait_period=3, timeout=600, ssh_interface='public_ips')
 
-        print "Running PrepareHost"
-        #print client.exec_command("bash /tmp/prepareHost.sh")
+        # client = paramiko.SSHClient()
+        # client.set_missing_host_key_policy(WarningPolicy())
+        # driver.wait_until_running([node],wait_period=3, timeout=600, ssh_interface='public_ips')
+        # client.connect(clusterNode["externalIP"], 22, SSH_USERNAME, None, pkey=None, key_filename=SSH_KEY_PATH,timeout=120)
+        print nodeName+": Running PrepareHost"
         (stdin, stdout, stderr)=client.exec_command("/tmp/prepareHost.sh")
         output = stdout.readlines()
         error = stderr.readlines
@@ -266,9 +278,43 @@ def createCluster(clusterDictionary,verbose):
     clusterDictionary["clusterNodes"]=clusterNodes
 
     pprint.pprint(clusterNodes)
+    rebootCluster(clusterDictionary,driver)
     hostPrep(clusterDictionary)
     hostsFiles(clusterDictionary)
     initGPDB(clusterDictionary)
+
+
+def rebootCluster(clusterDictionary,driver):
+    project = "pivotal-1211"
+    gpadminPW = "gpadmin"
+    SSH_USERNAME = "dbaskette"
+    SSH_KEY_PATH = "/Users/dbaskette/.ssh/google_compute_engine"
+    KEY = "/Users/dbaskette/Downloads/Pivotal-8b6ceb84c23f.json"
+    #nodes = driver.list_nodes()
+    # for nodeCnt in range(int(clusterDictionary["nodes"])):
+    #     #print nodes[nodeCnt]
+    #     print  driver.reboot_node(nodes[nodeCnt])
+
+    for node in clusterDictionary["clusterNodes"]:
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(WarningPolicy())
+        client.connect(node["externalIP"], 22, SSH_USERNAME, None, pkey=None, key_filename=SSH_KEY_PATH,timeout=120)
+        print  node["nodeName"] + ": Rebooting"
+        client.exec_command("sudo reboot -fq")
+
+        connected = False
+        while not connected:
+            try:
+                print node["nodeName"]+": Attempting SSH Connection post-reboot"
+                client.connect(node["externalIP"], 22, SSH_USERNAME, None, pkey=None, key_filename=SSH_KEY_PATH,
+                               timeout=120)
+                connected = True
+            except Exception as e:
+                print node["nodeName"] + ": --- Trying to get SSH Connection"
+                time.sleep(3)
+                sshException = e;
+
+
 
 
 def destroyCluster(clusterDictionary):
