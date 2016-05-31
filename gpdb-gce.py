@@ -3,12 +3,10 @@ __author__ = 'dbaskette'
 import argparse
 import vagrant
 import os
-#from common import ssh
 import pprint
 import shutil
 from libcloud.compute.types import Provider
 from libcloud.compute.providers import get_driver
-from libcloud.compute.ssh import ParamikoSSHClient
 
 import paramiko
 from paramiko.client import WarningPolicy
@@ -52,128 +50,100 @@ def queryCluster():
     sshConfig = v.ssh_config("gpdb-1-db1")
     ipAddress = sshConfig.splitlines()[1].split()[1]
 
-# def initGPDB(clusterDictionary):
-#     for node in clusterDictionary["nodeInfo"]:
-#         if ("master" in node["role"]):
-#             print "Initializing Greenplum Database"
-#             ssh.exec_command2(node["ipAddress"], "gpadmin", "gpadmin", "gpinitsystem -c /tmp/gpinitsystem_config -a")
-#
+
+def initGPDB(clusterDictionary):
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(WarningPolicy())
+    for node in clusterDictionary["clusterNodes"]:
+        if ("master" in node["role"]):
+            client.connect(node["externalIP"], 22, "gpadmin", "gpadmin",timeout=120)
+            print "Initializing Greenplum Database"
+            (stdin, stdout, stderr) = client.exec_command("gpinitsystem -c /tmp/gpinitsystem_config -a")
+            output = stdout.readlines()
+
+
+def hostPrep(clusterDictionary):
+    project = "pivotal-1211"
+    gpadminPW = "gpadmin"
+    SSH_USERNAME = "gpadmin"
+    #SSH_KEY_PATH = "/Users/dbaskette/.ssh/google_compute_engine"
+    #KEY = "/Users/dbaskette/Downloads/Pivotal-8b6ceb84c23f.json"
+
+    print "Creating Data Directories and Sharing gpadmin keys across Cluster for passwordless ssh"
+
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(WarningPolicy())
+    #client.connect(clusterNode["externalIP"], 22, SSH_USERNAME, None, pkey=None, key_filename=SSH_KEY_PATH, timeout=120)
+    print clusterDictionary
+    for node in clusterDictionary["clusterNodes"]:
+        client.connect(node["externalIP"], 22, SSH_USERNAME, password="gpadmin",timeout=120)
+        client.exec_command("echo 'source /usr/local/greenplum-db/greenplum_path.sh\n' >> ~/.bashrc")
+        client.exec_command("echo 'export MASTER_DATA_DIRECTORY=/data/master/gpseg-1\n' >> ~/.bashrc")
+        print "Configuring Node"
+        print "- Sharing gpadmin public key across cluster"
+        client.exec_command("ssh-keygen -f ~/.ssh/id_rsa -t rsa -N ''")
+        print " - Install Software for Passwordless SSH"
+        (stdin, stdout, stderr) = client.exec_command("sudo mv /etc/yum.repos.d/CentOS-SCL.repo /etc/yum.repos.d/CentOS-SCL.repo.old;sudo yum clean all;sudo yum install -y epel-release;sudo yum install -y sshpass")
+        output = stdout.readlines()
+        client.exec_command("echo 'Host *\nStrictHostKeyChecking no' >> ~/.ssh/config;chmod 400 ~/.ssh/config")
+        for node1 in clusterDictionary["clusterNodes"]:
+            (stdin, stdout, stderr) = client.exec_command("sshpass -p gpadmin  ssh-copy-id  gpadmin@" + node1["nodeName"])
+            output = stdout.readlines()
+
+
+        if ("master" in node["role"] or ("standby" in node["role"])):
+            print "- Configuring Master/Standby"
+            client.exec_command("sudo mkdir -p /data/master;sudo chown -R gpadmin: /data")
+            (stdin, stdout, stderr) = client.exec_command("gpssh-exkeys -f /tmp/allhosts")
+            output = stdout.readlines()
+            with open("./gpinitsystem_config", 'r+') as gpConfigFile:
+                content = gpConfigFile.read()
+                gpConfigFile.seek(0)
+                gpConfigFile.truncate()
+                gpConfigFile.write(content.replace("%MASTER%", node["nodeName"]))
+            sftp = client.open_sftp()
+            sftp.put("./gpinitsystem_config", "/tmp/gpinitsystem_config")
+        else:
+            print "- Configuring Worker"
+            client.exec_command("sudo mkdir -p /data/primary /data/mirror;sudo chown -R gpadmin: /data")
+        client.close()
 
 
 
-#
-# def hostPrep(clusterDictionary):
-#     print "Creating Data Directories and Sharing gpadmin keys across Cluster for passwordless ssh"
-#
-#     for node in clusterDictionary["nodeInfo"]:
-#         ssh.exec_command2(node["ipAddress"], "gpadmin", "gpadmin","echo 'source /usr/local/greenplum-db/greenplum_path.sh\n' >> ~/.bashrc")
-#         ssh.exec_command2(node["ipAddress"], "gpadmin", "gpadmin","echo 'export MASTER_DATA_DIRECTORY=/data/master/gpseg-1\n' >> ~/.bashrc")
-#         if ("master" in node["role"] or ("standby" in node["role"])):
-#             print "Sharing gpadmin public key across cluster"
-#             ssh.exec_command2(node["ipAddress"], "gpadmin", "gpadmin", "ssh-keygen -f ~/.ssh/id_rsa -t rsa -N ''")
-#             print " - Install Software for Passwordless SSH"
-#             ssh.exec_command2(node["ipAddress"], "gpadmin", "gpadmin","sudo mv /etc/yum.repos.d/CentOS-SCL.repo /etc/yum.repos.d/CentOS-SCL.repo.old;sudo yum clean all;sudo yum install -y epel-release;sudo yum install -y sshpass")
-#             ssh.exec_command2(node["ipAddress"], "gpadmin", "gpadmin","echo 'Host *\nStrictHostKeyChecking no' >> ~/.ssh/config;chmod 400 ~/.ssh/config")
-#             masterIP = node["ipAddress"]
-#             for node1 in clusterDictionary["nodeInfo"]:
-#                 ssh.exec_command2(masterIP, "gpadmin", "gpadmin", "sshpass -p gpadmin  ssh-copy-id  gpadmin@" + node1["nodeName"])
-#             ssh.exec_command2(masterIP, "gpadmin", "gpadmin", "sudo mkdir -p /data/master;sudo chown -R gpadmin: /data")
-#             with open("./gpinitsystem_config", 'r+') as gpConfigFile:
-#                 content = gpConfigFile.read()
-#                 gpConfigFile.seek(0)
-#                 gpConfigFile.truncate()
-#                 gpConfigFile.write(content.replace("%MASTER%", node["nodeName"]))
-#             ssh.putFile(masterIP, "gpinitsystem_config", "gpadmin", "gpadmin")
-#         else:
-#             ssh.exec_command2(node["ipAddress"], "gpadmin", "gpadmin", "sudo mkdir -p /data/primary /data/mirror;sudo chown -R gpadmin: /data")
-#
+
+def hostsFiles(clusterDictionary):
+    print "Build /etc/hosts file for Cluster Nodes"
+
+    clusterPath = "./" + clusterDictionary["clusterName"]
+
+    with open ("hosts","w") as hostsFile:
+        hostsFile.write("######  GPDB-GCE ENTRIES #######\n")
+        for node in clusterDictionary["clusterNodes"]:
+            hostsFile.write(node["internalIP"]+"  "+node["nodeName"]+"\n")
+
+    with open ("workers","w") as workersFile:
+        with open("allhosts", "w") as allhostsFile:
+            for node in clusterDictionary["clusterNodes"]:
+                if "master" in node["role"] :
+                    allhostsFile.write(node["nodeName"] + "\n")
+                elif "standby" in node["role"]:
+                    allhostsFile.write(node["nodeName"] + "\n")
+                else:
+                    workersFile.write(node["nodeName"] + "\n")
+                    allhostsFile.write(node["nodeName"] + "\n")
+
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(WarningPolicy())
 
 
-
-
-
-# def clusterStatus(clusterDictionary):
-#
-#     v = vagrant.Vagrant(quiet_stdout=True)
-#     nodeInfo = []
-#     for nodecnt in range(int(clusterDictionary["nodes"])):
-#         hostName = "gpdb-"+str(nodecnt+1)+"-"+clusterDictionary["clustername"]
-#         status =  v.status(hostName)
-#         ipAddress = v.ssh_config(hostName).splitlines()[1].split()[1]
-#         clusterNode = {}
-#         if int(nodecnt+1)==1:
-#             clusterNode["role"]="master"
-#         elif int(nodecnt+1)==2:
-#             clusterNode["role"]="standby"
-#         else:
-#             clusterNode["role"]="worker"
-#         clusterNode["nodeName"] = hostName
-#         clusterNode["ipAddress"] = ipAddress
-#         clusterNode["status"] = status
-#         nodeInfo.append(clusterNode)
-#         clusterNode["internalIPAddress"] = (ssh.exec_command2(ipAddress, "gpadmin", "gpadmin", cmd="hostname --all-ip-address"))[1].strip('\n')
-#         #ssh.exec_command(clusterNode["ipAddress"], "gpadmin", "gpadmin", "sudo service sshd reload")
-#
-#     clusterDictionary["nodeInfo"] = nodeInfo
-#     pprint.pprint(clusterDictionary)
-
-
-# def hostsFiles(clusterDictionary):
-#     print "Build /etc/hosts file for Cluster Nodes"
-#
-#     clusterPath = "./" + clusterDictionary["clustername"]
-#
-#     with open ("hosts","w") as hostsFile:
-#         hostsFile.write("######  GPDB-GCE ENTRIES #######\n")
-#         for node in clusterDictionary["nodeInfo"]:
-#             hostsFile.write(node["internalIPAddress"]+"  "+node["nodeName"]+"\n")
-#
-#     with open ("workers","w") as workersFile:
-#         with open("allhosts", "w") as allhostsFile:
-#             for node in clusterDictionary["nodeInfo"]:
-#                 if "master" in node["role"] :
-#                     allhostsFile.write(node["nodeName"] + "\n")
-#                 elif "standby" in node["role"]:
-#                     allhostsFile.write(node["nodeName"] + "\n")
-#                 else:
-#                     workersFile.write(node["nodeName"] + "\n")
-#                     allhostsFile.write(node["nodeName"] + "\n")
-#
-#
-#     for node in clusterDictionary["nodeInfo"]:
-#         ssh.putFile(node["ipAddress"],"hosts","gpadmin","gpadmin")
-#         ssh.exec_command2(node["ipAddress"],"gpadmin","gpadmin","sudo sh -c 'cat /tmp/hosts >> /etc/hosts'")
-#         ssh.putFile(node["ipAddress"],"allhosts","gpadmin","gpadmin")
-#         ssh.putFile(node["ipAddress"], "workers", "gpadmin", "gpadmin")
-
-
-# def createCluster(clusterDictionary,verbose):
-#
-#
-#     if not os.path.exists(clusterDictionary["clustername"]):
-#         os.makedirs(clusterDictionary["clustername"])
-#     clusterPath = "./" + clusterDictionary["clustername"]
-#     with open(clusterPath + "/Vagrantfile", "w") as vagrantfile:
-#         with open("./Vagrantfile.master") as master:
-#             for line in master:
-#                 if "%CLUSTERNAME%" in line:
-#                     vagrantfile.write(line.replace("%CLUSTERNAME%", clusterDictionary["clustername"]))
-#                 elif "%CLUSTERNODES%" in line:
-#                     vagrantfile.write(line.replace("%CLUSTERNODES%", clusterDictionary["nodes"]))
-#                 else:
-#                     vagrantfile.write(line)
-#
-#     os.chdir(clusterPath)
-#     shutil.copyfile("../configs/gpinitsystem_config","./gpinitsystem_config")
-#
-#     v = vagrant.Vagrant(quiet_stdout=verbose)
-#     v.up(provider="google")
-#     clusterStatus(clusterDictionary)
-#     hostsFiles(clusterDictionary)
-#     hostPrep(clusterDictionary)
-#     initGPDB(clusterDictionary)
-
-
+    for node in clusterDictionary["clusterNodes"]:
+        client.connect(node["externalIP"], 22, "gpadmin", "gpadmin")
+        sftp = client.open_sftp()
+        sftp.put("hosts","/tmp/hosts")
+        sftp.put("allhosts","/tmp/allhosts")
+        sftp.put("workers", "/tmp/workers")
+        client.exec_command("sudo sh -c 'cat /tmp/hosts >> /etc/hosts'")
+    client.close()
 
 
 
@@ -204,6 +174,13 @@ def createCluster(clusterDictionary,verbose):
     for nodeCnt in range(int(clusterDictionary["nodes"])):
         clusterNode = {}
         nodeName = clusterDictionary["clusterName"]+"-"+str(nodeCnt+1).zfill(3)
+
+
+
+
+
+
+
         gce_disk_struct = [
                 {
                     "kind": "compute#attachedDisk",
@@ -233,16 +210,22 @@ def createCluster(clusterDictionary,verbose):
         clusterNode["nodeName"] = nodeName
         print nodeName+": External IP: "+clusterNode["externalIP"]
         print nodeName+": Internal IP: "+clusterNode["internalIP"]
+        # Set Server Role
+
+        if (nodeCnt + 1) == 1:
+            clusterNode["role"] = "master"
+        elif (nodeCnt + 1) == 2:
+            clusterNode["role"] = "standby"
+        else:
+            clusterNode["role"] = "worker"
+
         clusterNodes.append(clusterNode)
         print nodeName+": Prepping Host"
 
+        # This Sleep should be turned into a try catch on the SSH connection with a while loop so that it cuts the time to provision
 
-        #sshClient=ParamikoSSHClient(clusterNode["externalIP"],22,SSH_USERNAME,None,key=None,key_files=SSH_KEY_PATH,timeout=120)
-
-       # Do something more elaborate here.  Perhaps Build all server then do the SSH stuff
-
-        time.sleep(60)
-        #sshClient.connect()
+        time.sleep(40)
+        #driver.wait_until_running(nodeName,wait_period=3, timeout=600, ssh_interface='public_ips')
 
 
 
@@ -252,33 +235,40 @@ def createCluster(clusterDictionary,verbose):
         sftp = client.open_sftp()
         sftp.put("../configs/sysctl.conf.gpdb", "/tmp/sysctl.conf.gpdb")
         sftp.put("../configs/limits.conf.gpdb", "/tmp/limits.conf.gpdb")
+        sftp.put("../scripts/prepareHost.sh","/tmp/prepareHost.sh")
         client.close()
-
 
         #  MOVE THIS TO NEW METHOD   def preInstallPrep
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(WarningPolicy())
         client.connect(clusterNode["externalIP"],22,SSH_USERNAME,None,pkey=None,key_filename=SSH_KEY_PATH,timeout=120)
 
-        print client.exec_command("sudo sed -i 's|[#]*PasswordAuthentication no|PasswordAuthentication yes|g' /etc/ssh/sshd_config")
-        print client.exec_command("sudo sed -i 's|UsePAM no|UsePAM yes|g' /etc/ssh/sshd_config")
-        print client.exec_command("sudo sh -c 'echo Defaults !requiretty\n > /etc/sudoers.d/888-dont-requiretty'")
-        print client.exec_command("sudo sh -c 'cat /tmp/sysctl.conf.gpdb >> /etc/sysctl.conf'")
-        print client.exec_command("sudo sh -c 'cat /tmp/limits.conf.gpdb >> /etc/security/limits.conf'")
+        client.exec_command("sudo sed -i 's|[#]*PasswordAuthentication no|PasswordAuthentication yes|g' /etc/ssh/sshd_config")
+        client.exec_command("sudo sed -i 's|UsePAM no|UsePAM yes|g' /etc/ssh/sshd_config")
+        client.exec_command("sudo sh -c 'echo Defaults !requiretty\n > /etc/sudoers.d/888-dont-requiretty'")
+        client.exec_command("sudo sh -c 'cat /tmp/sysctl.conf.gpdb >> /etc/sysctl.conf'")
+        client.exec_command("sudo sh -c 'cat /tmp/limits.conf.gpdb >> /etc/security/limits.conf'")
+        client.exec_command("sudo chmod +x /tmp/prepareHost.sh")
+        print "Rebooting Hosts to change System Settings"
+
+        #node = driver.reboot_node(nodeName)
+        print driver.list_nodes()
+
+        
+        #driver.wait_until_running([nodeName],wait_period=3, timeout=600, ssh_interface='public_ips')
+
+        print "Running PrepareHost"
+        #print client.exec_command("bash /tmp/prepareHost.sh")
+        (stdin, stdout, stderr)=client.exec_command("/tmp/prepareHost.sh")
+        output = stdout.readlines()
+        error = stderr.readlines
         client.close()
+    clusterDictionary["clusterNodes"]=clusterNodes
 
     pprint.pprint(clusterNodes)
-
-
- #
-# "shell", inline: "cat '/vagrant/configs/sysctl.conf.gpdb' >> /etc/sysctl.conf"
-# node.vm.provision
-# "shell", inline: "cat '/vagrant/configs/limits.conf.gpdb' >> /etc/security/limits.conf"
-#
-# node.vm.provision
-# "shell", path: "../scripts/prepareHost.sh"
-
-
+    hostPrep(clusterDictionary)
+    hostsFiles(clusterDictionary)
+    initGPDB(clusterDictionary)
 
 
 def destroyCluster(clusterDictionary):
@@ -294,3 +284,6 @@ def destroyCluster(clusterDictionary):
 
 if __name__ == '__main__':
     cliParse()
+
+# CLASS SETUP
+#https://github.com/mgoddard-pivotal/dsip_ec2_setup

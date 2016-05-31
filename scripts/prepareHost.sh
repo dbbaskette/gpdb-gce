@@ -23,6 +23,7 @@ securityChanges(){
     echo "Disabling SELinux"
     sudo setenforce 0
     sudo sed -i "s/SELINUX=enforcing/SELINUX=disabled/" /etc/selinux/config
+    sudo service sshd reload
 
 }
 
