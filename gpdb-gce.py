@@ -60,6 +60,7 @@ def initGPDB(clusterDictionary):
             print "Initializing Greenplum Database"
             (stdin, stdout, stderr) = client.exec_command("gpinitsystem -c /tmp/gpinitsystem_config -a")
             output = stdout.readlines()
+            (stdin, stdout, stderr) = client.exec_command("echo git clonegpinitsystem -c /tmp/gpinitsystem_config -a")
 
 
 def hostPrep(clusterDictionary):
@@ -82,7 +83,7 @@ def hostPrep(clusterDictionary):
         print "- Sharing gpadmin public key across cluster"
         client.exec_command("ssh-keygen -f ~/.ssh/id_rsa -t rsa -N ''")
         print " - Install Software for Passwordless SSH"
-        (stdin, stdout, stderr) = client.exec_command("sudo mv /etc/yum.repos.d/CentOS-SCL.repo /etc/yum.repos.d/CentOS-SCL.repo.old;sudo yum clean all;sudo yum install -y epel-release;sudo yum install -y sshpass")
+        (stdin, stdout, stderr) = client.exec_command("sudo mv /etc/yum.repos.d/CentOS-SCL.repo /etc/yum.repos.d/CentOS-SCL.repo.old;sudo yum clean all;sudo yum install -y epel-release sshpass git")
         output = stdout.readlines()
         client.exec_command("echo 'Host *\nStrictHostKeyChecking no' >> ~/.ssh/config;chmod 400 ~/.ssh/config")
         for node1 in clusterDictionary["clusterNodes"]:
@@ -94,7 +95,7 @@ def hostPrep(clusterDictionary):
             print "- Configuring Master/Standby"
             client.exec_command("sudo mkdir -p /data/master;sudo chown -R gpadmin: /data")
             (stdin, stdout, stderr) = client.exec_command("gpssh-exkeys -f /tmp/allhosts")
-            output = stdout.readlines()
+            print stdout.readlines()
             with open("./gpinitsystem_config", 'r+') as gpConfigFile:
                 content = gpConfigFile.read()
                 gpConfigFile.seek(0)
@@ -143,6 +144,7 @@ def hostsFiles(clusterDictionary):
         sftp.put("workers", "/tmp/workers")
         client.exec_command("sudo sh -c 'cat /tmp/hosts >> /etc/hosts'")
     client.close()
+
 
 
 
@@ -223,15 +225,12 @@ def createCluster(clusterDictionary,verbose):
         clusterNodes.append(clusterNode)
         print nodeName+": Prepping Host"
 
-        # This Sleep should be turned into a try catch on the SSH connection with a while loop so that it cuts the time to provision
-
 
 
         client = paramiko.SSHClient()
         keyOutput = client.set_missing_host_key_policy(WarningPolicy())
 
-        #time.sleep(40)
-        # Block until Host comes up and then block until SSH is ready.
+
         driver.wait_until_running([node],wait_period=3, timeout=600, ssh_interface='public_ips')
 
         connected = False
@@ -301,13 +300,16 @@ def rebootCluster(clusterDictionary,driver):
         client.connect(node["externalIP"], 22, SSH_USERNAME, None, pkey=None, key_filename=SSH_KEY_PATH,timeout=120)
         print  node["nodeName"] + ": Rebooting"
         client.exec_command("sudo reboot -fq")
-
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(WarningPolicy())
         connected = False
         while not connected:
             try:
                 print node["nodeName"]+": Attempting SSH Connection post-reboot"
                 client.connect(node["externalIP"], 22, SSH_USERNAME, None, pkey=None, key_filename=SSH_KEY_PATH,
                                timeout=120)
+                (stdin, stdout, stderr) = client.exec_command("hostname -f")
+                print node["nodeName"] + ": SSH TEST : "+ stdout.readlines()
                 connected = True
             except Exception as e:
                 print node["nodeName"] + ": --- Trying to get SSH Connection"
