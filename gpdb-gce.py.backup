@@ -1,4 +1,4 @@
-__auth__author__ = 'dbaskette'
+__author__ = 'dbaskette'
 
 import argparse
 import os
@@ -90,7 +90,6 @@ def hostPrep(clusterDictionary):
         print " - Install Software for Passwordless SSH"
         (stdin, stdout, stderr) = client.exec_command("sudo mv /etc/yum.repos.d/CentOS-SCL.repo /etc/yum.repos.d/CentOS-SCL.repo.old;sudo yum clean all;sudo yum install -y epel-release;sudo yum install -y sshpass git")
         print stderr.readlines()
-
         print stdout.readlines()
 
         client.exec_command("echo 'Host *\nStrictHostKeyChecking no' >> ~/.ssh/config;chmod 400 ~/.ssh/config")
@@ -339,4 +338,4 @@ if __name__ == '__main__':
     cliParse()
 
 # CLASS SETUP
-#https://github.com/mgoddard-pivotal/dsip_ec2_setupdard-pivotal/dsip_ec2_setup
+#https://github.com/mgoddard-pivotal/dsip_ec2_setup

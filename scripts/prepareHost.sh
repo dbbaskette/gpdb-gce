@@ -3,6 +3,8 @@
 # This script runs as personal user with sudo privs.
 
 GPZIP=greenplum-db-4.3.8.2-build-1-RHEL5-x86_64.zip
+MADLIB=madlib-ossv1.9_pv1.9.5_gpdb4.3orca-rhel5-x86_64.tar.gz
+PLR=plr-ossv8.3.0.15_pv2.1_gpdb4.3orca-rhel5-x86_64.gppkg
 
 userSetup(){
     echo "Setting password for GPADMIN on all Nodes"
@@ -58,7 +60,27 @@ installGPDBbins(){
     sed -i 's/pathVerification=/pathVerification=1/' ./$GPBIN
     sed -i '/defaultInstallPath=/a installPath=${defaultInstallPath}' ./$GPBIN
     sudo ./$GPBIN
+    sudo chown -R gpadmin: /usr/local/greenplum-db*
+
 }
+
+downloadExtensions(){
+    wget https://storage.googleapis.com/pivedu-bins/$MADLIB -O /tmp/$MADLIB
+    wget https://storage.googleapis.com/pivedu-bins/$PLR -O /tmp/$PLR
+
+    cd /tmp;tar xvfz /tmp/$MADLIB
+    sudo chown -R gpadmin: *.gppkg
+
+
+
+}
+
+installSoftware(){
+    sudo yum install epel-release
+    sudo yum install -y sshpass git
+   # sudo yum install -y R
+#
+#}
 
 
 
@@ -67,7 +89,10 @@ _main() {
     securitySetup
     networkSetup
     installGPDBbins
+    downloadExtensions
     setupDisk
+    installSoftware
+
 
 
 
