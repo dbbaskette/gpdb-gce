@@ -1,16 +1,20 @@
 __author__ = 'dbaskette'
 
 import argparse
+import json
 import os
 import pprint
 import shutil
-import socket
 import time
+import warnings
+
 import paramiko
 from libcloud.compute.providers import get_driver
 from libcloud.compute.types import Provider
-from paramiko import AuthenticationException,BadHostKeyException,SSHException
 from paramiko import WarningPolicy
+
+from staging import Users
+from staging import DataLoading
 
 SERVER_TYPE = 'n1-standard-16'
 IMAGE = 'centos-6-v20160526'
@@ -28,16 +32,26 @@ PLR="plr-ossv8.3.0.15_pv2.1_gpdb4.3orca-rhel5-x86_64.gppkg"
 
 
 def cliParse():
-    VALID_ACTION = ["create","destroy","query"]
+    VALID_ACTION = ["create","destroy","query","stage","gpcontrol"]
     parser = argparse.ArgumentParser(description='Pivotal Education Lab Builder')
     subparsers = parser.add_subparsers(help='sub-command help', dest="subparser_name")
     parser_create = subparsers.add_parser("create", help="Create a Cluster")
     parser_destroy = subparsers.add_parser("destroy", help="Destroy a Cluster")
-    parser_query = subparsers.add_parser("query", help="Destroy a Cluster")
+    parser_query = subparsers.add_parser("query", help="Query a Cluster")
+    parser_stage = subparsers.add_parser("stage", help="Stage a Cluster")
+    parser_gpdb = subparsers.add_parser("gpdb", help="Start/Stop, get state of GPDB")
+
 
     parser_create.add_argument("--clustername", dest='clustername', action="store",help="Name of Cluster to be Created",required=True)
     parser_create.add_argument("--nodes", dest='nodes', default=1, action="store", help="Number of Nodes to be Created",required=True)
     parser_create.add_argument("-v", dest='verbose', action='store_true',required=False)
+
+    parser_stage.add_argument("--clustername", dest='clustername', action="store",help="Name of Cluster to be Staged",required=True)
+    parser_query.add_argument("--clustername", dest='clustername', action="store",help="Name of Cluster to be Staged",required=True)
+
+    parser_gpdb.add_argument("--clustername", dest='clustername', action="store",help="Name of Cluster to be Staged",required=True)
+
+    parser_gpdb.add_argument("--action", dest='action', action="store",help="start/stop/state",required=True)
 
 
     parser_destroy.add_argument("--clustername", dest='clustername', action="store",help="Name of Cluster to be Deleted",required=True)
@@ -53,12 +67,61 @@ def cliParse():
 
     elif (args.subparser_name == "destroy"):
         clusterDictionary["clusterName"] = args.clustername
+        print "Not Yet Implemented"
     elif (args.subparser_name == "query"):
-        clusterDictionary["clusterName"] = args.clustername
+        clusterInfo = queryCluster(args.clustername)
 
+
+    elif (args.subparser_name == "stage"):
+        clusterInfo = queryCluster(args.clustername)
+        stageCluster(clusterInfo)
+
+    elif (args.subparser_name == "gpdb"):
+        clusterName = (args.clustername)
+        with open("./" + clusterName + "/clusterInfo.json") as clusterInfoFile:
+            clusterInfo = json.load(clusterInfoFile)
+        Users.gpControl(clusterInfo,args.action)
+
+
+
+
+def stageCluster(clusterInfo):
+    #Users.create(clusterInfo)
+    #Users.moveGPADMIN(clusterInfo)
+    DataLoading.setup(clusterInfo)
+
+
+
+
+
+
+
+
+
+
+
+def queryCluster(clusterName):
+
+    with open("./"+clusterName+"/clusterInfo.json") as clusterInfoFile:
+        clusterInfo = json.load(clusterInfoFile)
+    print('\n')
+    print
+    print "Cluster Name    : "+clusterInfo["clusterName"]
+    print "Number of Nodes : "+clusterInfo["nodes"]
+    print "--------------------------------------------"
+    for node in clusterInfo["clusterNodes"]:
+        print "     Node Name  : "+node["nodeName"]
+        print "     Role       : "+node["role"]
+        print "     External IP: "+node["externalIP"]
+        print "     Internal IP: " + node["internalIP"]
+        print "--------------------------------------------"
+
+    return clusterInfo
 
 
 def initGPDB(clusterDictionary):
+    warnings.simplefilter("ignore")
+
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(WarningPolicy())
     for node in clusterDictionary["clusterNodes"]:
@@ -71,6 +134,7 @@ def initGPDB(clusterDictionary):
 
 
 def installAnalytics(clusterDictionary):
+    warnings.simplefilter("ignore")
 
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(WarningPolicy())
@@ -100,6 +164,7 @@ def installAnalytics(clusterDictionary):
 def hostPrep(clusterDictionary):
     print "Running hostPrep"
     print "Creating Data Directories and Sharing gpadmin keys across Cluster for passwordless ssh"
+    warnings.simplefilter("ignore")
 
 
     #client.connect(clusterNode["externalIP"], 22, SSH_USERNAME, None, pkey=None, key_filename=SSH_KEY_PATH, timeout=120)
@@ -112,19 +177,10 @@ def hostPrep(clusterDictionary):
                 attemptCount += 1
                 ssh = paramiko.SSHClient()
                 ssh.set_missing_host_key_policy(WarningPolicy())
-                # (stdin, stdout, stderr) = ssh.exec_command("sudo mkdir /data")
-                # print stderr.readlines()
-                # print stdout.readlines()
-                # (stdin, stdout, stderr) = ssh.exec_command("sudo  sh -c 'echo LABEL=gpdbdata /data xfs rw,noatime,inode64,allocsize=16m 0 0 >> /etc/fstab'")
-                # print stderr.readlines()
-                # print stdout.readlines()
-                # (stdin, stdout, stderr) = ssh.exec_command("sudo mount -a")
-                # print stderr.readlines()
-                # print stdout.readlines()
                 ssh.connect(node["externalIP"], 22, "gpadmin", password=GPADMIN_PW, timeout=120)
                 ssh.exec_command("echo 'source /usr/local/greenplum-db/greenplum_path.sh\n' >> ~/.bashrc")
                 ssh.exec_command("echo 'export MASTER_DATA_DIRECTORY=/data/master/gpseg-1\n' >> ~/.bashrc")
-                print node["externalIP"] + ": Configuring Node"
+                print node["nodeName"] + ": Configuring Node"
                 print " - Sharing gpadmin public key across cluster"
                 (stdin, stdout, stderr) = ssh.exec_command("echo -e  'y\n'|ssh-keygen -f ~/.ssh/id_rsa -t rsa -N ''")
                 stderr.readlines()
@@ -246,6 +302,7 @@ def hostsFiles(clusterDictionary):
 
 
 def createCluster(clusterDictionary,verbose):
+    warnings.simplefilter("ignore")
 
     print "Create Cluster via Apache libCloud"
     if not os.path.exists(clusterDictionary["clusterName"]):
@@ -284,7 +341,7 @@ def createCluster(clusterDictionary,verbose):
         print nodeName + ": Creating Data Disk Volume"
         volume = driver.create_volume(DISK_SIZE, nodeName + "-data-disk", None, None, None, False, "pd-standard")
         clusterNode["nodeName"] = nodeName
-        clusterNode["dataVolume"] = volume
+        clusterNode["dataVolume"] = str(volume)
         print nodeName + ": Attaching Disk Volume"
         node = driver.ex_get_node(nodeName)
         driver.attach_volume(node, volume, device=None, ex_mode=None, ex_boot=False, ex_type=None, ex_source=None,
@@ -357,36 +414,14 @@ def createCluster(clusterDictionary,verbose):
 
 
     clusterDictionary["clusterNodes"]=clusterNodes
-
-    pprint.pprint(clusterNodes)
+    clusterInfoJSON = json.dumps(clusterDictionary)
+    pprint.pprint(clusterInfoJSON)
+    with open("clusterInfo.json", "w") as clusterFile:
+         clusterFile.write(clusterInfoJSON)
     hostsFiles(clusterDictionary)
-    #
     hostPrep(clusterDictionary)
     initGPDB(clusterDictionary)
     installAnalytics(clusterDictionary)
-
-
-
-# def check_ssh(ip):
-#     initial_wait=5
-#     interval=3
-#     retries=40
-#     ssh = paramiko.SSHClient()
-#     ssh.set_missing_host_key_policy(WarningPolicy())
-#
-#     time.sleep(initial_wait)
-#
-#     for x in range(retries):
-#         try:
-#
-#             ssh.connect(ip, 22, SSH_USERNAME, None, pkey=None, key_filename=SSH_KEY_PATH,timeout=120)
-#             ssh.close()
-#             return True
-#         except Exception as e:
-#             print e
-#             time.sleep(interval)
-#             print "Testing SSH Connectivity"
-#     return False
 
 
 
