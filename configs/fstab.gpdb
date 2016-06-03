@@ -1,0 +1,2 @@
+#######   GPDB-GCE DATA DISK #####
+LABEL=gpdbdata /data xfs rw,noatime,inode64,allocsize=16m 0 0

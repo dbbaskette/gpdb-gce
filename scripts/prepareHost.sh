@@ -24,10 +24,9 @@ p
 
 w
 EOF
-sudo mkfs.xfs -f /dev/sdb1 -L gpdbdata
-#sudo e2label /dev/sdb1 gpdbdata
 sudo mkdir /data
-sudo sh -c "echo 'LABEL=gpdbdata /data xfs rw,noatime,inode64,allocsize=16m 0 0' >> /etc/fstab"
+sudo sh -c "cat /tmp/fstab.gpdb >> /etc/fstab"
+sudo mkfs.xfs -f /dev/sdb1 -L gpdbdata
 
 }
 
@@ -75,13 +74,6 @@ downloadExtensions(){
 
 }
 
-installSoftware(){
-    sudo yum install epel-release
-    sudo yum install -y sshpass git
-   # sudo yum install -y R
-#
-#}
-
 
 
 _main() {
@@ -91,7 +83,6 @@ _main() {
     installGPDBbins
     downloadExtensions
     setupDisk
-    installSoftware
 
 
 
@@ -100,10 +91,3 @@ _main() {
 
 
 _main "$@"
-
-
-# client.exec_command("sudo sed -i 's|[#]*PasswordAuthentication no|PasswordAuthentication yes|g' /etc/ssh/sshd_config")
-#        client.exec_command("sudo sed -i 's|UsePAM no|UsePAM yes|g' /etc/ssh/sshd_config")
-#        client.exec_command("sudo sh -c 'echo Defaults !requiretty\n > /etc/sudoers.d/888-dont-requiretty'")
-#        client.exec_command("sudo sh -c 'cat /tmp/sysctl.conf.gpdb >> /etc/sysctl.conf'")
-#        client.exec_command("sudo sh -c 'cat /tmp/limits.conf.gpdb >> /etc/security/limits.conf'")

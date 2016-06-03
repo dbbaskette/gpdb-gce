@@ -79,19 +79,19 @@ def installAnalytics(clusterDictionary):
             print node["nodeName"] + ": Installing MADlib"
             ssh.connect(node["externalIP"], 22, "gpadmin", password=GPADMIN_PW, timeout=120)
             (stdin, stdout, stderr) =ssh.exec_command("gppkg -i /tmp/"+MADLIB)
-            outputErr = stderr.readlines()
-            outputOut = stdout.readlines()
+            stderr.readlines()
+            stdout.readlines()
             ssh.exec_command("$GPHOME/madlib/bin/madpack install -s madlib -p greenplum -c gpadmin@"+node["nodeName"]+"/template1")
             ssh.exec_command("$GPHOME/madlib/bin/madpack install -s madlib -p greenplum -c gpadmin@"+node["nodeName"]+"/gpadmin")
-            outputErr = stderr.readlines()
-            outputOut = stdout.readlines()
             print "     - Installing R on all the Nodes.  This might take awhile."
-            ssh.exec_command("gpssh -f /tmp/allhosts sudo yum -y install R")
+            (stdin, stdout, stderr) =ssh.exec_command("gpssh -f /tmp/allhosts 'sudo yum -y install R'")
+            stderr.readlines()
+            stdout.readlines()
             ssh.exec_command("createlang plpythonu -d template1")
             ssh.exec_command("createlang plpythonu -d gpadmin")
             (stdin, stdout, stderr) =   ssh.exec_command("gppkg -i /tmp/"+PLR)
-            outputErr = stderr.readlines()
-            outputOut = stdout.readlines()
+            stderr.readlines()
+            stdout.readlines()
             ssh.exec_command("createlang plr -d template1")
             ssh.exec_command("createlang plr -d gpadmin")
             print "     - MADLib, PL/Python, PL/R Enabled"
@@ -101,69 +101,88 @@ def hostPrep(clusterDictionary):
     print "Running hostPrep"
     print "Creating Data Directories and Sharing gpadmin keys across Cluster for passwordless ssh"
 
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(WarningPolicy())
+
     #client.connect(clusterNode["externalIP"], 22, SSH_USERNAME, None, pkey=None, key_filename=SSH_KEY_PATH, timeout=120)
     for node in clusterDictionary["clusterNodes"]:
-        client.connect(node["externalIP"], 22, "gpadmin", password=GPADMIN_PW,timeout=120)
-        client.exec_command("echo 'source /usr/local/greenplum-db/greenplum_path.sh\n' >> ~/.bashrc")
-        client.exec_command("echo 'export MASTER_DATA_DIRECTORY=/data/master/gpseg-1\n' >> ~/.bashrc")
-        print "Configuring Node"
-        print "- Sharing gpadmin public key across cluster"
-        (stdin, stdout, stderr)=client.exec_command("echo -e  'y\n'|ssh-keygen -f ~/.ssh/id_rsa -t rsa -N ''")
-        outputErr = stderr.readlines()
-        outputOut = stdout.readlines()
-        print " - Install Software for Passwordless SSH"
-        print "     - Repair Repos and Install Software"
-        (stdin, stdout, stderr) = client.exec_command("sudo rm -f /etc/yum.repos.d/CentOS-SCL*;sudo yum clean all;sudo yum install -y epel-release;sudo yum install -y sshpass git")
-        print stderr.readlines()
-        print stdout.readlines()
 
-        #print "     - Install GIT and R"
-        #(stdin, stdout, stderr) = client.exec_command("sudo yum install -y git R")
-        #outputErr = stderr.readlines()
-        #outputOut = stdout.readlines()
+        connected = False
+        attemptCount = 0
+        while not connected:
+            try:
+                attemptCount += 1
+                ssh = paramiko.SSHClient()
+                ssh.set_missing_host_key_policy(WarningPolicy())
+                # (stdin, stdout, stderr) = ssh.exec_command("sudo mkdir /data")
+                # print stderr.readlines()
+                # print stdout.readlines()
+                # (stdin, stdout, stderr) = ssh.exec_command("sudo  sh -c 'echo LABEL=gpdbdata /data xfs rw,noatime,inode64,allocsize=16m 0 0 >> /etc/fstab'")
+                # print stderr.readlines()
+                # print stdout.readlines()
+                # (stdin, stdout, stderr) = ssh.exec_command("sudo mount -a")
+                # print stderr.readlines()
+                # print stdout.readlines()
+                ssh.connect(node["externalIP"], 22, "gpadmin", password=GPADMIN_PW, timeout=120)
+                ssh.exec_command("echo 'source /usr/local/greenplum-db/greenplum_path.sh\n' >> ~/.bashrc")
+                ssh.exec_command("echo 'export MASTER_DATA_DIRECTORY=/data/master/gpseg-1\n' >> ~/.bashrc")
+                print node["externalIP"] + ": Configuring Node"
+                print " - Sharing gpadmin public key across cluster"
+                (stdin, stdout, stderr) = ssh.exec_command("echo -e  'y\n'|ssh-keygen -f ~/.ssh/id_rsa -t rsa -N ''")
+                stderr.readlines()
+                stdout.readlines()
+                print " - Install Software for Passwordless SSH"
+                print " - Repair Repos and Install Software"
+                (stdin, stdout, stderr) = ssh.exec_command("sudo rm -f /etc/yum.repos.d/CentOS-SCL*;sudo yum clean all;sudo yum install -y epel-release;sudo yum clean all;sudo yum install -y sshpass git")
+                stderr.readlines()
+                stdout.readlines()
+                print " - Share gpadmin keys"
+                ssh.exec_command("echo 'Host *\nStrictHostKeyChecking no' >> ~/.ssh/config;chmod 400 ~/.ssh/config")
+                for node1 in clusterDictionary["clusterNodes"]:
+                    (stdin, stdout, stderr) = ssh.exec_command(
+                        "sshpass -p " + GPADMIN_PW + "  ssh-copy-id  gpadmin@" + node1["nodeName"])
+                    stderr.readlines()
+                    stdout.readlines()
 
-        ####### BLOCK MOVED  #####
-        print "     - Share gpadmin keys"
-        client.exec_command("echo 'Host *\nStrictHostKeyChecking no' >> ~/.ssh/config;chmod 400 ~/.ssh/config")
-        for node1 in clusterDictionary["clusterNodes"]:
-            (stdin, stdout, stderr) = client.exec_command("sshpass -p "+GPADMIN_PW+ "  ssh-copy-id  gpadmin@" + node1["nodeName"])
-            stderr.readlines()
-            stdout.readlines()
-        ###############
 
-        if ("master" in node["role"] or ("standby" in node["role"])):
-            #####
-            ###### MOVED BLOCK HERE TO CUT DOWN RUN TIME ####
-            #print "     - Share Masters Key across Cluster"
-            #for node1 in clusterDictionary["clusterNodes"]:
-            #    (stdin, stdout, stderr) = client.exec_command("sshpass -p " + GPADMIN_PW + "  ssh-copy-id  gpadmin@" + node1["nodeName"])
-            #    stderr.readlines()
-            #    stdout.readlines()
-            ####################
-            print "     - Configuring Role as Master/Standby"
-            client.exec_command("sudo mkdir -p /data/master;sudo chown -R gpadmin: /data")
-            print "     - Share Keys among all hosts"
-            (stdin, stdout, stderr) = client.exec_command("gpssh-exkeys -f /tmp/allhosts")
-            stderr.readlines()
-            stdout.readlines()
-            print "     - Build GPDB Config File"
+                if ("master" in node["role"] or ("standby" in node["role"])):
 
-            with open("./gpinitsystem_config", 'r+') as gpConfigFile:
-                content = gpConfigFile.read()
-                gpConfigFile.seek(0)
-                gpConfigFile.truncate()
-                gpConfigFile.write(content.replace("%MASTER%", node["nodeName"]))
-            sftp = client.open_sftp()
-            sftp.put("./gpinitsystem_config", "/tmp/gpinitsystem_config")
-        elif ("worker" in node["role"]):
-            print " - Configuring Role as Worker"
-            client.exec_command("sudo mkdir -p /data/primary /data/mirror;sudo chown -R gpadmin: /data")
-        else:
-            print " - Configuring Role as ETL Host"
-            client.exec_command("sudo mkdir -p /data;sudo chown -R gpadmin: /data")
-        client.close()
+                    print "     - Configuring Role as Master/Standby"
+                    ssh.exec_command("sudo mkdir -p /data/master;sudo chown -R gpadmin: /data")
+                    print "     - Share Keys among all hosts"
+                    (stdin, stdout, stderr) = ssh.exec_command("gpssh-exkeys -f /tmp/allhosts")
+                    stderr.readlines()
+                    stdout.readlines()
+                    print "     - Build GPDB Config File"
+
+                    with open("./gpinitsystem_config", 'r+') as gpConfigFile:
+                        content = gpConfigFile.read()
+                        gpConfigFile.seek(0)
+                        gpConfigFile.truncate()
+                        gpConfigFile.write(content.replace("%MASTER%", node["nodeName"]))
+                    sftp = ssh.open_sftp()
+                    sftp.put("./gpinitsystem_config", "/tmp/gpinitsystem_config")
+                elif ("worker" in node["role"]):
+                    print " - Configuring Role as Worker"
+                    ssh.exec_command("sudo mkdir -p /data/primary /data/mirror;sudo chown -R gpadmin: /data")
+                else:
+                    print " - Configuring Role as ETL Host"
+                    ssh.exec_command("sudo mkdir -p /data;sudo chown -R gpadmin: /data")
+                connected = True
+            except Exception as e:
+                # print e
+                print node["nodeName"] + ": Attempting SSH Connection"
+                time.sleep(3)
+                if attemptCount > 40:
+                    print "Failing Process"
+                    exit()
+            finally:
+                ssh.close()
+
+
+
+
+
+
+
 
 def hostsFiles(clusterDictionary):
     print "Running hostsFile to Build all needed Hosts files."
@@ -194,21 +213,34 @@ def hostsFiles(clusterDictionary):
 
 
     for node in clusterDictionary["clusterNodes"]:
-        sshOnline = False
-        while not sshOnline:
-            sshOnline = check_ssh(node["externalIP"])
-        ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(WarningPolicy())
-        #ssh.connect(node["externalIP"], 22, "gpadmin", password=GPADMIN_PW,timeout=120)
-        ssh.connect(node["externalIP"], 22, SSH_USERNAME, None, pkey=None, key_filename=SSH_KEY_PATH,timeout=120)
 
-        sftp = ssh.open_sftp()
-        sftp.put("hosts","/tmp/hosts")
-        sftp.put("allhosts","/tmp/allhosts")
-        sftp.put("workers", "/tmp/workers")
-        ssh.exec_command("sudo sh -c 'cat /tmp/hosts >> /etc/hosts'")
-        ssh.exec_command("sudo chmod 755 /tmp/allhosts;sudo chmod 755 /tmp/workers")
-        ssh.close()
+        connected = False
+        attemptCount = 0
+        while not connected:
+            try:
+                attemptCount += 1
+                ssh = paramiko.SSHClient()
+                ssh.set_missing_host_key_policy(WarningPolicy())
+
+                ssh.connect(node["externalIP"], 22, SSH_USERNAME, None, pkey=None, key_filename=SSH_KEY_PATH,timeout=120)
+                sftp = ssh.open_sftp()
+                sftp.put("hosts", "/tmp/hosts")
+                sftp.put("allhosts", "/tmp/allhosts")
+                sftp.put("workers", "/tmp/workers")
+                ssh.exec_command("sudo sh -c 'cat /tmp/hosts >> /etc/hosts'")
+                connected = True
+            except Exception as e:
+                #print e
+                print node["nodeName"]+": Attempting SSH Connection"
+                time.sleep(3)
+                if attemptCount > 40:
+                    print "Failing Process"
+                    exit()
+            finally:
+                ssh.close()
+
+
+
 
 
 
@@ -278,28 +310,51 @@ def createCluster(clusterDictionary,verbose):
 
         print nodeName+": Prepping Host"
 
-        ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(WarningPolicy())
+
         connected = False
+        attemptCount=0
         while not connected:
             try:
-                ssh.connect(clusterNode["externalIP"], 22, SSH_USERNAME, None, pkey=None, key_filename=SSH_KEY_PATH, timeout=120)
-                connected = True
-            except (BadHostKeyException, AuthenticationException,SSHException, socket.error) as e:
+                attemptCount+=1
+                ssh = paramiko.SSHClient()
+                ssh.set_missing_host_key_policy(WarningPolicy())
+
+                ssh.connect(clusterNode["externalIP"], 22, SSH_USERNAME, None, pkey=None, key_filename=SSH_KEY_PATH,timeout=120)
+                sftp = ssh.open_sftp()
+                sftp.put("../configs/sysctl.conf.gpdb", "/tmp/sysctl.conf.gpdb")
+                sftp.put("../configs/limits.conf.gpdb", "/tmp/limits.conf.gpdb")
+                sftp.put("../configs/fstab.gpdb", "/tmp/fstab.gpdb")
+
+                sftp.put("../scripts/prepareHost.sh", "/tmp/prepareHost.sh")
+
+                ssh.exec_command("sudo chmod +x /tmp/prepareHost.sh")
+                print nodeName + ": Running /tmp/prepareHost.sh"
+                (stdin, stdout, stderr) = ssh.exec_command("/tmp/prepareHost.sh &> /tmp/prepareHost.log")
+                stdout.readlines()
+                stderr.readlines()
+                (stdin, stdout, stderr) = ssh.exec_command("sudo mkdir /data")
+                stdout.readlines()
+                stderr.readlines()
+
+
+                print  nodeName + ": Rebooting to make System Config Changes"
+                ssh.close()
+                driver.reboot_node(node)
+                connected=True
+            except Exception as e:
+                #print e
+                print nodeName+": Attempting SSH Connection"
                 time.sleep(3)
-                print clusterNode["nodeName"]+ ": Waiting for SSH Connection"
 
-        sftp = ssh.open_sftp()
-        sftp.put("../configs/sysctl.conf.gpdb", "/tmp/sysctl.conf.gpdb")
-        sftp.put("../configs/limits.conf.gpdb", "/tmp/limits.conf.gpdb")
-        sftp.put("../scripts/prepareHost.sh","/tmp/prepareHost.sh")
-        ssh.exec_command("sudo chmod +x /tmp/prepareHost.sh")
+                if attemptCount > 40:
+                    print "Failing Process"
+                    exit()
+            finally:
+                ssh.close()
 
-        (stdin, stdout, stderr)=ssh.exec_command("/tmp/prepareHost.sh")
-        output = stdout.readlines()
-        error = stderr.readlines
-        print  nodeName + ": Rebooting to make System Config Changes"
-        ssh.exec_command("sudo reboot -fq")
+
+
+
 
     clusterDictionary["clusterNodes"]=clusterNodes
 
@@ -312,46 +367,26 @@ def createCluster(clusterDictionary,verbose):
 
 
 
-
-def rebootCluster(clusterDictionary,driver):
-
-    for node in clusterDictionary["clusterNodes"]:
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(WarningPolicy())
-        client.connect(node["externalIP"], 22, SSH_USERNAME, None, pkey=None, key_filename=SSH_KEY_PATH,timeout=120)
-        print  node["nodeName"] + ": Rebooting"
-        client.exec_command("sudo reboot -fq")
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(WarningPolicy())
-        sshOnline = False
-        while not sshOnline:
-            sshOnline = check_ssh(node["externalIP"])
-
-
-
-
-
-
-
-def check_ssh(ip):
-    initial_wait=5
-    interval=3
-    retries=40
-    ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(WarningPolicy())
-
-    time.sleep(initial_wait)
-
-    for x in range(retries):
-        try:
-
-            ssh.connect(ip, 22, SSH_USERNAME, None, pkey=None, key_filename=SSH_KEY_PATH,timeout=120)
-            ssh.close()
-            return True
-        except Exception as e:
-            time.sleep(interval)
-            print "Testing SSH Connectivity"
-    return False
+# def check_ssh(ip):
+#     initial_wait=5
+#     interval=3
+#     retries=40
+#     ssh = paramiko.SSHClient()
+#     ssh.set_missing_host_key_policy(WarningPolicy())
+#
+#     time.sleep(initial_wait)
+#
+#     for x in range(retries):
+#         try:
+#
+#             ssh.connect(ip, 22, SSH_USERNAME, None, pkey=None, key_filename=SSH_KEY_PATH,timeout=120)
+#             ssh.close()
+#             return True
+#         except Exception as e:
+#             print e
+#             time.sleep(interval)
+#             print "Testing SSH Connectivity"
+#     return False
 
 
 
